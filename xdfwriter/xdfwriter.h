@@ -40,6 +40,7 @@ private:
 	// write a generic chunk
 	void _write_chunk(
 		chunk_tag_t tag, const std::string &content, const streamid_t *streamid_p = nullptr);
+		
 
 public:
 	/**
@@ -47,6 +48,14 @@ public:
 	 * @param filename  Filename to write to
 	 */
 	XDFWriter(const std::string &filename);
+
+	void close() {
+    std::lock_guard<std::mutex> lock(write_mut);
+    if (file_) {
+        file_.flush();
+        file_.close();
+    }
+}
 
 	template <typename T>
 	void write_data_chunk(streamid_t streamid, const std::vector<double> &timestamps,

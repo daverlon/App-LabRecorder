@@ -1,6 +1,5 @@
 #include "recording.h"
 
-#include "xdf.h"
 //#include "conversions.h"
 
 #include <filesystem>
@@ -12,13 +11,6 @@
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/iostreams/device/file_descriptor.hpp>
 #include <boost/iostreams/filter/zlib.hpp>
-#endif
-
-
-#ifdef BUILD_GUI
-#include <QThread> // for QThread::msleep
-#include <QApplication>
-#include <QMessageBox>
 #endif
 
 
@@ -133,162 +125,228 @@ recording::~recording() {
 			std::cout << "boundary_thread didn't finish in time!" << std::endl;
 			boundary_thread_->detach();
 		}
-
-		convertToCSV();
-
 		std::cout << "Closing the file." << std::endl;
+
 	} catch (std::exception &e) {
 		std::cout << "Error while closing the recording: " << e.what() << std::endl;
 	}
 }
-bool recording::convertToCSV() {
-    namespace fs = std::filesystem;
 
-    std::cout << "[INFO] Starting CSV conversion..." << std::endl;
 
-#ifdef BUILD_GUI
-    QMessageBox loadingBox;
-    loadingBox.setWindowTitle("Loading");
-    loadingBox.setText("CSV conversion in progress...");
-    loadingBox.setStandardButtons(QMessageBox::NoButton);
-    loadingBox.show();
-#endif
+// bool recording::convertToCSV() {
+//     namespace fs = std::filesystem;
 
-    try {
-        std::cout << "[INFO] Preparing output directory and base filename..." << std::endl;
-        fs::path basePath(this->csv_filename_);
-        fs::path dir = basePath.parent_path();
-        std::string baseName = basePath.stem().string();
+//     std::cout << "[INFO] Starting CSV conversion..." << std::endl;
 
-        if (!dir.empty() && !fs::exists(dir)) {
-            std::cout << "[INFO] Creating directory: " << dir << std::endl;
-            fs::create_directories(dir);
-        }
+// #ifdef BUILD_GUI
+//     QMessageBox loadingBox;
+//     loadingBox.setWindowTitle("Loading");
+//     loadingBox.setText("CSV conversion in progress...");
+//     loadingBox.setStandardButtons(QMessageBox::NoButton);
+//     loadingBox.show();
+// #endif
 
-        std::cout << "[INFO] Loading XDF file: " << this->xdf_filename_ << std::endl;
-        Xdf XDFdata;
-        XDFdata.load_xdf(this->xdf_filename_);
+//     try {
+//         if (this->csv_filename_.empty()) {
+//             std::cerr << "[ERROR] csv_filename_ is empty." << std::endl;
+//             #ifdef BUILD_GUI
+//             loadingBox.close();
+//             QMessageBox::critical(nullptr, "Error", "CSV filename is empty.");
+//             #endif
+//             return false;
+//         }
 
-        int nStreams = static_cast<int>(XDFdata.streams.size());
-        std::cout << "[INFO] Found " << nStreams << " streams in the XDF file." << std::endl;
+//         std::cout << "[INFO] Preparing output directory and base filename..." << std::endl;
+//         fs::path basePath(this->csv_filename_);
+//         fs::path dir = basePath.parent_path();
+//         std::string baseName = basePath.stem().string();
 
-        std::vector<std::string> generatedFiles;
+//         if (!dir.empty() && !fs::exists(dir)) {
+//             std::cout << "[INFO] Creating directory: " << dir << std::endl;
+//             fs::create_directories(dir);
+//         }
 
-        for (int i = 0; i < nStreams; i++) {
-            std::cout << "[INFO] Processing stream " << i << "..." << std::endl;
+//         std::cout << "[INFO] Loading XDF file: " << this->xdf_filename_ << std::endl;
+//         Xdf XDFdata;
+//         XDFdata.load_xdf(this->xdf_filename_);
 
-            const auto& stream = XDFdata.streams[i];
-            std::string streamName = stream.info.name.empty() ? ("stream_" + std::to_string(i)) : stream.info.name;
+//         int nStreams = static_cast<int>(XDFdata.streams.size());
+//         std::cout << "[INFO] Found " << nStreams << " streams in the XDF file." << std::endl;
 
-            for (auto& c : streamName) {
-                if (!std::isalnum(c) && c != '_' && c != '-') {
-                    c = '_';
-                }
-            }
+//         std::vector<std::string> generatedFiles;
 
-            fs::path outputFile = dir / (baseName + "_" + streamName + ".csv");
+//         for (int i = 0; i < nStreams; i++) {
+//             std::cout << "[INFO] Processing stream " << i << "..." << std::endl;
 
-            // Handle existing file by renaming it to *_oldN.csv
-            if (fs::exists(outputFile)) {
-                int version = 1;
-                fs::path oldFile;
-                do {
-                    oldFile = dir / (baseName + "_" + streamName + "_old" + std::to_string(version) + ".csv");
-                    version++;
-                } while (fs::exists(oldFile));
+//             const auto& stream = XDFdata.streams[i];
+//             std::string streamName = stream.info.name.empty() ? ("stream_" + std::to_string(i)) : stream.info.name;
 
-                std::cout << "[INFO] Renaming existing file: " << outputFile
-                          << " -> " << oldFile << std::endl;
-                fs::rename(outputFile, oldFile);
-            }
+//             for (auto& c : streamName) {
+//                 if (!std::isalnum(c) && c != '_' && c != '-') {
+//                     c = '_';
+//                 }
+//             }
 
-            std::cout << "[INFO] Saving CSV to: " << outputFile << std::endl;
+//             fs::path outputFile = dir / (baseName + "_" + streamName + ".csv");
 
-            std::ofstream out(outputFile.string());
-            if (!out.is_open()) {
-#ifdef BUILD_GUI
-                loadingBox.close();
-                QMessageBox::critical(nullptr, "Error", "Failed to open file: " + QString::fromStdString(outputFile.string()));
-#endif
-                std::cerr << "[ERROR] Failed to open file: " << outputFile << std::endl;
-                return false;
-            }
+//             if (fs::exists(outputFile)) {
+//                 int version = 1;
+//                 fs::path oldFile;
+//                 do {
+//                     oldFile = dir / (baseName + "_" + streamName + "_old" + std::to_string(version) + ".csv");
+//                     version++;
+//                 } while (fs::exists(oldFile));
 
-            size_t channel_count = stream.info.channel_count;
-            size_t meta_channels_count = stream.info.channels.size();
+//                 std::cout << "[INFO] Renaming existing file: " << outputFile
+//                           << " -> " << oldFile << std::endl;
+//                 try {
+//                     fs::rename(outputFile, oldFile);
+//                 } catch (const std::exception& e) {
+//                     std::cerr << "[ERROR] Failed to rename file " << outputFile << ": " << e.what() << std::endl;
+//                     #ifdef BUILD_GUI
+//                     loadingBox.close();
+//                     QMessageBox::critical(nullptr, "Error", QString("Failed to rename file: %1").arg(e.what()));
+//                     #endif
+//                     return false;
+//                 }
+//             }
 
-            std::cout << "[INFO] Stream \"" << streamName << "\": "
-                      << channel_count << " channels, "
-                      << stream.time_stamps.size() << " samples." << std::endl;
+//             std::cout << "[INFO] Saving CSV to: " << outputFile << std::endl;
 
-            out << "timestamp";
-            for (size_t ch = 0; ch < channel_count; ++ch) {
-                std::string label = "ch" + std::to_string(ch);
-                if (ch < meta_channels_count) {
-                    const auto& meta = stream.info.channels[ch];
-                    auto it = meta.find("label");
-                    if (it != meta.end() && !it->second.empty()) {
-                        label = it->second;
-                    }
-                }
-                out << "," << label;
-            }
-            out << "\n";
+//             std::ofstream out(outputFile.string());
+//             if (!out.is_open()) {
+//                 std::cerr << "[ERROR] Failed to open file: " << outputFile << std::endl;
+//                 #ifdef BUILD_GUI
+//                 loadingBox.close();
+//                 QMessageBox::critical(nullptr, "Error", QString("Failed to open file: %1").arg(QString::fromStdString(outputFile.string())));
+//                 #endif
+//                 return false;
+//             }
 
-            size_t nSamples = std::min(stream.time_stamps.size(), stream.time_series.size());
-            for (size_t j = 0; j < nSamples; ++j) {
-                out << stream.time_stamps[j];
-                for (const auto& val : stream.time_series[j]) {
-                    try {
-                        std::visit([&out](auto&& arg) {
-                            out << "," << arg;
-                        }, val);
-                    } catch (const std::exception& e) {
-                        std::cerr << "[WARN] Error visiting variant at stream " << i << ", sample " << j
-                                  << ": " << e.what() << std::endl;
-                        out << ",NA";
-                    }
-                }
-                out << "\n";
+//             if (stream.time_stamps.empty() || stream.time_series.empty()) {
+//                 std::cout << "[WARN] Stream " << streamName << " is empty, skipping CSV generation." << std::endl;
+//                 out.close();
+//                 continue;
+//             }
 
-                if (j > 0 && j % 1000 == 0) {
-                    std::cout << "[INFO] Written " << j << " samples for stream " << streamName << std::endl;
-                }
-            }
+//             size_t channel_count = stream.info.channel_count;
+//             size_t meta_channels_count = stream.info.channels.size();
 
-            out.close();
-            std::cout << "[INFO] Finished writing CSV: " << outputFile << std::endl;
-            generatedFiles.push_back(outputFile.string());
-        }
+//             std::cout << "[INFO] Stream \"" << streamName << "\": "
+//                       << channel_count << " channels, "
+//                       << stream.time_stamps.size() << " samples." << std::endl;
 
-#ifdef BUILD_GUI
-        loadingBox.close();
-#endif
+//             if (!stream.time_series.empty() && stream.time_series[0].size() != channel_count) {
+//                 std::cerr << "[WARN] Stream " << streamName << ": channel_count (" << channel_count
+//                           << ") does not match time_series size (" << stream.time_series[0].size() << "), skipping stream." << std::endl;
+//                 #ifdef BUILD_GUI
+//                 QMessageBox::warning(nullptr, "Warning", QString("Invalid channel count in stream %1, skipping.").arg(QString::fromStdString(streamName)));
+//                 #endif
+//                 out.close();
+//                 continue;
+//             }
 
-        std::string message = "CSV conversion completed successfully.\n\nGenerated files:\n";
-        for (const auto& file : generatedFiles) {
-            message += file + "\n";
-        }
+//             // For single-channel marker streams, use a descriptive label
+//             out << "timestamp";
+//             for (size_t ch = 0; ch < channel_count; ++ch) {
+//                 std::string label = channel_count == 1 ? "Marker" : ("ch" + std::to_string(ch));
+//                 if (ch < meta_channels_count) {
+//                     const auto& meta = stream.info.channels[ch];
+//                     auto it = meta.find("label");
+//                     if (it != meta.end() && !it->second.empty()) {
+//                         label = it->second;
+//                     }
+//                 }
+//                 // Sanitize label
+//                 for (auto& c : label) {
+//                     if (!std::isalnum(c) && c != '_' && c != '-') {
+//                         c = '_';
+//                     }
+//                 }
+//                 out << "," << label;
+//             }
+//             out << "\n";
 
-#ifdef BUILD_GUI
-        QMessageBox::information(nullptr, "Finished", QString::fromStdString(message));
-#else
-        std::cout << "[SUCCESS] " << message << std::endl;
-#endif
+//             auto escapeCSV = [](const std::string& value) {
+//                 if (value.find_first_of(",\"\n") == std::string::npos) {
+//                     return value;
+//                 }
+//                 std::string escaped = "\"";
+//                 for (char c : value) {
+//                     if (c == '"') escaped += "\"\"";
+//                     else escaped += c;
+//                 }
+//                 escaped += "\"";
+//                 return escaped;
+//             };
 
-    } catch (const std::exception& e) {
-#ifdef BUILD_GUI
-        loadingBox.close();
-        QMessageBox::critical(nullptr, "Error", QString("Exception: %1").arg(e.what()));
-#else
-        std::cerr << "[ERROR] Exception in convertToCSV: " << e.what() << std::endl;
-#endif
-        return false;
-    }
+//             size_t nSamples = std::min(stream.time_stamps.size(), stream.time_series.size());
+//             if (stream.time_stamps.size() != stream.time_series.size()) {
+//                 std::cerr << "[WARN] Stream " << streamName << ": time_stamps size (" << stream.time_stamps.size()
+//                           << ") does not match time_series size (" << stream.time_series.size() << ")." << std::endl;
+//             }
 
-    std::cout << "[INFO] convertToCSV() finished successfully.\n" << std::endl;
-    return true;
-}
+//             for (size_t j = 0; j < nSamples; ++j) {
+//                 out << stream.time_stamps[j];
+//                 for (const auto& val : stream.time_series[j]) {
+//                     try {
+//                         std::visit([&out, &escapeCSV](auto&& arg) {
+//                             std::stringstream ss;
+//                             ss << arg;
+//                             std::string value = ss.str();
+//                             std::cout << "[DEBUG] Writing marker value: " << value << std::endl;
+//                             out << "," << escapeCSV(value);
+//                         }, val);
+//                     } catch (const std::exception& e) {
+//                         std::cerr << "[WARN] Error visiting variant at stream " << i << ", sample " << j
+//                                   << ": " << e.what() << std::endl;
+//                         out << ",NA";
+//                     }
+//                 }
+//                 out << "\n";
+
+//                 if (j > 0 && j % 1000 == 0) {
+//                     std::cout << "[INFO] Written " << j << " samples for stream " << streamName << std::endl;
+//                 }
+//             }
+
+//             out.close();
+//             std::cout << "[INFO] Finished writing CSV: " << outputFile << std::endl;
+//             generatedFiles.push_back(outputFile.string());
+//         }
+
+// #ifdef BUILD_GUI
+//         loadingBox.close();
+// #endif
+
+//         std::string message = "CSV conversion completed successfully.\n\nGenerated files:\n";
+//         if (generatedFiles.empty()) {
+//             message = "No valid streams found to convert to CSV.";
+//         } else {
+//             for (const auto& file : generatedFiles) {
+//                 message += file + "\n";
+//             }
+//         }
+
+// #ifdef BUILD_GUI
+//         QMessageBox::information(nullptr, "Finished", QString::fromStdString(message));
+// #else
+//         std::cout << "[SUCCESS] " << message << std::endl;
+// #endif
+
+//     } catch (const std::exception& e) {
+//         #ifdef BUILD_GUI
+//         loadingBox.close();
+//         QMessageBox::critical(nullptr, "Error", QString("Exception: %1").arg(e.what()));
+//         #else
+//         std::cerr << "[ERROR] Exception in convertToCSV: " << e.what() << std::endl;
+//         #endif
+//         return false;
+//     }
+
+//     std::cout << "[INFO] convertToCSV() finished successfully.\n" << std::endl;
+//     return true;
+// }
 
 
 

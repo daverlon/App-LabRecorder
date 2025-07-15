@@ -1,4 +1,6 @@
-﻿#include "mainwindow.h"
+﻿#include "xdf.h"
+
+#include "mainwindow.h"
 #include "ui_mainwindow.h"
 
 #include <QDateTime>
@@ -467,12 +469,143 @@ void MainWindow::startRecording() {
 	}
 }
 
+std::string variantToString(const std::variant<int, float, double, int64_t, std::string>& v) {
+    if (std::holds_alternative<int>(v)) return std::to_string(std::get<int>(v));
+    if (std::holds_alternative<float>(v)) return std::to_string(std::get<float>(v));
+    if (std::holds_alternative<double>(v)) return std::to_string(std::get<double>(v));
+    if (std::holds_alternative<int64_t>(v)) return std::to_string(std::get<int64_t>(v));
+    if (std::holds_alternative<std::string>(v)) {
+        // Escape quotes inside strings for CSV compliance
+        std::string s = std::get<std::string>(v);
+        if (s.find(',') != std::string::npos || s.find('"') != std::string::npos) {
+            std::ostringstream escaped;
+            escaped << '"';
+            for (char c : s) {
+                if (c == '"') escaped << "\"\""; // double quotes inside field
+                else escaped << c;
+            }
+            escaped << '"';
+            return escaped.str();
+        }
+        return s;
+    }
+    return "";
+}
+
+void exportXdfStreamsToCsv(const Xdf& xdf, const std::string& outputDir = "./CSV") {
+    namespace fs = std::filesystem;
+
+    if (!fs::exists(outputDir) && !fs::create_directories(outputDir)) {
+        std::cerr << "[ERROR] Failed to create directory: " << outputDir << std::endl;
+        return;
+    }
+
+    for (size_t streamIdx = 0; streamIdx < xdf.streams.size(); ++streamIdx) {
+        const auto& stream = xdf.streams[streamIdx];
+        std::string streamName = stream.info.name.empty() ? ("stream_" + std::to_string(streamIdx)) : stream.info.name;
+        std::string csvFilename = outputDir + "/" + streamName + ".csv";
+
+        std::ofstream csvFile(csvFilename);
+        if (!csvFile.is_open()) {
+            std::cerr << "[ERROR] Cannot open file: " << csvFilename << std::endl;
+            continue;
+        }
+
+        // Determine which channels to skip (timestamp-labeled)
+        std::vector<int> includedChannels;
+        for (int ch = 0; ch < stream.info.channel_count; ++ch) {
+            std::string label;
+            if (ch < (int)stream.info.channels.size() && stream.info.channels[ch].count("label"))
+                label = stream.info.channels[ch].at("label");
+
+            std::string labelLower = label;
+            std::transform(labelLower.begin(), labelLower.end(), labelLower.begin(), ::tolower);
+
+            if (labelLower == "timestamp") continue;  // skip duplicate timestamp column
+            includedChannels.push_back(ch);
+        }
+
+        // Header
+        csvFile << "Timestamp";
+        for (int ch : includedChannels) {
+            if (ch < (int)stream.info.channels.size() && stream.info.channels[ch].count("label"))
+                csvFile << "," << stream.info.channels[ch].at("label");
+            else
+                csvFile << ",Channel" << (ch + 1);
+        }
+        csvFile << "\n";
+
+        // Data
+        size_t nSamples = stream.time_stamps.size();
+        for (size_t sampleIdx = 0; sampleIdx < nSamples; ++sampleIdx) {
+            csvFile << stream.time_stamps[sampleIdx];
+            for (int ch : includedChannels) {
+                csvFile << ",";
+                if (ch < (int)stream.time_series.size() &&
+                    sampleIdx < stream.time_series[ch].size()) {
+                    csvFile << variantToString(stream.time_series[ch][sampleIdx]);
+                }
+            }
+            csvFile << "\n";
+        }
+
+        csvFile.close();
+        std::cout << "[INFO] Exported " << streamName << " to " << csvFilename << std::endl;
+    }
+}
+
 void MainWindow::stopRecording() {
 
+
 	if (currentRecording) {
+
+
+		std::string xdf_filename_ = std::string(currentRecording->xdf_filename_);
+		std::string csv_filename_ = std::string(currentRecording->csv_filename_);
+
 		try {
 			currentRecording = nullptr;
 		} catch (std::exception &e) { qWarning() << "exception on stop: " << e.what(); }
+
+
+		Xdf xdf;
+		if (xdf.load_xdf(xdf_filename_) == 0) {
+
+		std::filesystem::path xdf_path(xdf_filename_);
+		std::string folderName = xdf_path.stem().string();  // e.g. "recording"
+		std::filesystem::path base_output_dir = xdf_path.parent_path();
+		std::filesystem::path csv_output_dir = base_output_dir / folderName;
+
+		if (std::filesystem::exists(csv_output_dir)) {
+			// Find a new name for the existing folder by appending _oldN
+			int counter = 1;
+			std::filesystem::path old_folder;
+			do {
+				old_folder = base_output_dir / (folderName + "_old" + std::to_string(counter));
+				++counter;
+			} while (std::filesystem::exists(old_folder));
+
+			// Rename the existing folder to the new _oldN folder
+			std::error_code ec;
+			std::filesystem::rename(csv_output_dir, old_folder, ec);
+			if (ec) {
+				std::cerr << "[ERROR] Failed to rename existing folder " << csv_output_dir << " to " << old_folder << ": " << ec.message() << "\n";
+				// You might want to handle this error more gracefully
+			}
+		}
+
+		// Now create a fresh folder for new CSVs
+		std::filesystem::create_directories(csv_output_dir);
+		exportXdfStreamsToCsv(xdf, csv_output_dir.string());
+
+
+		} else {
+			std::cerr << "Failed to load XDF file\n";
+		}
+
+
+
+
 		ui->startButton->setEnabled(true);
 		ui->stopButton->setEnabled(false);
 		statusBar()->showMessage("Stopped");
