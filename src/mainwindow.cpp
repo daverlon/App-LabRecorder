@@ -9,6 +9,7 @@
 #include <QMessageBox>
 #include <QSettings>
 #include <QStandardPaths>
+#include <QStringList>
 #if QT_VERSION_MAJOR < 6
 #include <QRegExp>
 #else
@@ -500,6 +501,9 @@ void exportXdfStreamsToCsv(const Xdf& xdf, const std::string& outputDir = "./CSV
         return;
     }
 
+	QStringList exportedFiles;  // Qt list to collect exported filenames
+
+
     for (size_t streamIdx = 0; streamIdx < xdf.streams.size(); ++streamIdx) {
         const auto& stream = xdf.streams[streamIdx];
         std::string streamName = stream.info.name.empty() ? ("stream_" + std::to_string(streamIdx)) : stream.info.name;
@@ -551,6 +555,15 @@ void exportXdfStreamsToCsv(const Xdf& xdf, const std::string& outputDir = "./CSV
 
         csvFile.close();
         std::cout << "[INFO] Exported " << streamName << " to " << csvFilename << std::endl;
+
+		exportedFiles << QString::fromStdString(csvFilename);
+    }
+
+	if (!exportedFiles.isEmpty()) {
+        QMessageBox::information(nullptr,
+                                 "Export Complete",
+                                 "Exported CSV files:\n" + exportedFiles.join("\n"),
+                                 QMessageBox::Ok);
     }
 }
 
