@@ -46,9 +46,18 @@ MainWindow::MainWindow(QWidget *parent, const char *config_file)
 	connect(ui->startButton, &QPushButton::clicked, this, &MainWindow::startRecording);
 	connect(ui->stopButton, &QPushButton::clicked, this, &MainWindow::stopRecording);
 	connect(ui->actionAbout, &QAction::triggered, this, [this]() {
+
+		// QString infostr = QStringLiteral("LSL library version: ") +
+		// 				  QString::number(lsl::library_version()) +
+		// 				  "\nLSL library info:" + lsl::library_info();
+
 		QString infostr = QStringLiteral("LSL library version: ") +
-						  QString::number(lsl::library_version()) +
-						  "\nLSL library info:" + lsl::library_info();
+                  QString::number(lsl::library_version()) +
+                  "\nLSL library info: " + lsl::library_info() +
+                  "\n\nThis is a modified version of LabRecorder with added CSV export functionality, "
+                  "developed to improve data accessibility and streamline export workflows."
+                  "\n\nFor support or issues, please contact the organisation that provided this software.";
+
 		QMessageBox::about(this, "About this app", infostr);
 	});
 
