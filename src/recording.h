@@ -75,6 +75,11 @@ public:
 	void requestStop() noexcept;
 
 private:
+	std::string xdf_filename_;
+	std::string csv_filename_;
+
+	bool convertToCSV();
+
 	// the file stream
 	XDFWriter file_; // the file output stream
 	// static information

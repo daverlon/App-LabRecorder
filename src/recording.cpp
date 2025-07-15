@@ -1,16 +1,37 @@
 #include "recording.h"
+
+#include "xdf.h"
 //#include "conversions.h"
 
+#include <filesystem>
 #include <set>
 #include <sstream>
+#include <ostream>
+#include <fstream>
 #ifdef XDFZ_SUPPORT
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/iostreams/device/file_descriptor.hpp>
 #include <boost/iostreams/filter/zlib.hpp>
 #endif
 
+
+#ifdef BUILD_GUI
+#include <QThread> // for QThread::msleep
+#include <QApplication>
+#include <QMessageBox>
+#endif
+
+
 // Thread utilities
 using Clock = std::chrono::high_resolution_clock;
+
+std::string replaceXDFwithCSV(const std::string &filename) {
+size_t pos = filename.rfind(".xdf");
+	if (pos != std::string::npos) {
+		return filename.substr(0, pos) + ".csv";
+	}
+	return filename;
+}
 
 /**
  * @brief try_join_once		joins and deconstructs the thread if possible
@@ -84,10 +105,12 @@ inline void timed_join_or_detach(
 recording::recording(const std::string &filename, const std::vector<lsl::stream_info> &streams,
 	const std::vector<std::string> &watchfor, std::map<std::string, int> syncOptions,
 	bool collect_offsets)
-	: file_(filename), offsets_enabled_(collect_offsets), unsorted_(false), streamid_(0),
+	: xdf_filename_(filename), csv_filename_(replaceXDFwithCSV(filename)), file_(filename), offsets_enabled_(collect_offsets), unsorted_(false), streamid_(0),
 	  shutdown_(false), headers_to_finish_(0), streaming_to_finish_(0),
 	  sync_options_by_stream_(std::move(syncOptions)) {
 	// create a recording thread for each stream
+	std::cout << "XDF Filename: " << xdf_filename_ << std::endl;
+	std::cout << "CSV Filename: " << csv_filename_ << std::endl;
 	for (const auto &stream : streams)
 		stream_threads_.emplace_back(
 			new std::thread(&recording::record_from_streaminfo, this, stream, true));
@@ -110,11 +133,164 @@ recording::~recording() {
 			std::cout << "boundary_thread didn't finish in time!" << std::endl;
 			boundary_thread_->detach();
 		}
+
+		convertToCSV();
+
 		std::cout << "Closing the file." << std::endl;
 	} catch (std::exception &e) {
 		std::cout << "Error while closing the recording: " << e.what() << std::endl;
 	}
 }
+bool recording::convertToCSV() {
+    namespace fs = std::filesystem;
+
+    std::cout << "[INFO] Starting CSV conversion..." << std::endl;
+
+#ifdef BUILD_GUI
+    QMessageBox loadingBox;
+    loadingBox.setWindowTitle("Loading");
+    loadingBox.setText("CSV conversion in progress...");
+    loadingBox.setStandardButtons(QMessageBox::NoButton);
+    loadingBox.show();
+#endif
+
+    try {
+        std::cout << "[INFO] Preparing output directory and base filename..." << std::endl;
+        fs::path basePath(this->csv_filename_);
+        fs::path dir = basePath.parent_path();
+        std::string baseName = basePath.stem().string();
+
+        if (!dir.empty() && !fs::exists(dir)) {
+            std::cout << "[INFO] Creating directory: " << dir << std::endl;
+            fs::create_directories(dir);
+        }
+
+        std::cout << "[INFO] Loading XDF file: " << this->xdf_filename_ << std::endl;
+        Xdf XDFdata;
+        XDFdata.load_xdf(this->xdf_filename_);
+
+        int nStreams = static_cast<int>(XDFdata.streams.size());
+        std::cout << "[INFO] Found " << nStreams << " streams in the XDF file." << std::endl;
+
+        std::vector<std::string> generatedFiles;
+
+        for (int i = 0; i < nStreams; i++) {
+            std::cout << "[INFO] Processing stream " << i << "..." << std::endl;
+
+            const auto& stream = XDFdata.streams[i];
+            std::string streamName = stream.info.name.empty() ? ("stream_" + std::to_string(i)) : stream.info.name;
+
+            for (auto& c : streamName) {
+                if (!std::isalnum(c) && c != '_' && c != '-') {
+                    c = '_';
+                }
+            }
+
+            fs::path outputFile = dir / (baseName + "_" + streamName + ".csv");
+
+            // Handle existing file by renaming it to *_oldN.csv
+            if (fs::exists(outputFile)) {
+                int version = 1;
+                fs::path oldFile;
+                do {
+                    oldFile = dir / (baseName + "_" + streamName + "_old" + std::to_string(version) + ".csv");
+                    version++;
+                } while (fs::exists(oldFile));
+
+                std::cout << "[INFO] Renaming existing file: " << outputFile
+                          << " -> " << oldFile << std::endl;
+                fs::rename(outputFile, oldFile);
+            }
+
+            std::cout << "[INFO] Saving CSV to: " << outputFile << std::endl;
+
+            std::ofstream out(outputFile.string());
+            if (!out.is_open()) {
+#ifdef BUILD_GUI
+                loadingBox.close();
+                QMessageBox::critical(nullptr, "Error", "Failed to open file: " + QString::fromStdString(outputFile.string()));
+#endif
+                std::cerr << "[ERROR] Failed to open file: " << outputFile << std::endl;
+                return false;
+            }
+
+            size_t channel_count = stream.info.channel_count;
+            size_t meta_channels_count = stream.info.channels.size();
+
+            std::cout << "[INFO] Stream \"" << streamName << "\": "
+                      << channel_count << " channels, "
+                      << stream.time_stamps.size() << " samples." << std::endl;
+
+            out << "timestamp";
+            for (size_t ch = 0; ch < channel_count; ++ch) {
+                std::string label = "ch" + std::to_string(ch);
+                if (ch < meta_channels_count) {
+                    const auto& meta = stream.info.channels[ch];
+                    auto it = meta.find("label");
+                    if (it != meta.end() && !it->second.empty()) {
+                        label = it->second;
+                    }
+                }
+                out << "," << label;
+            }
+            out << "\n";
+
+            size_t nSamples = std::min(stream.time_stamps.size(), stream.time_series.size());
+            for (size_t j = 0; j < nSamples; ++j) {
+                out << stream.time_stamps[j];
+                for (const auto& val : stream.time_series[j]) {
+                    try {
+                        std::visit([&out](auto&& arg) {
+                            out << "," << arg;
+                        }, val);
+                    } catch (const std::exception& e) {
+                        std::cerr << "[WARN] Error visiting variant at stream " << i << ", sample " << j
+                                  << ": " << e.what() << std::endl;
+                        out << ",NA";
+                    }
+                }
+                out << "\n";
+
+                if (j > 0 && j % 1000 == 0) {
+                    std::cout << "[INFO] Written " << j << " samples for stream " << streamName << std::endl;
+                }
+            }
+
+            out.close();
+            std::cout << "[INFO] Finished writing CSV: " << outputFile << std::endl;
+            generatedFiles.push_back(outputFile.string());
+        }
+
+#ifdef BUILD_GUI
+        loadingBox.close();
+#endif
+
+        std::string message = "CSV conversion completed successfully.\n\nGenerated files:\n";
+        for (const auto& file : generatedFiles) {
+            message += file + "\n";
+        }
+
+#ifdef BUILD_GUI
+        QMessageBox::information(nullptr, "Finished", QString::fromStdString(message));
+#else
+        std::cout << "[SUCCESS] " << message << std::endl;
+#endif
+
+    } catch (const std::exception& e) {
+#ifdef BUILD_GUI
+        loadingBox.close();
+        QMessageBox::critical(nullptr, "Error", QString("Exception: %1").arg(e.what()));
+#else
+        std::cerr << "[ERROR] Exception in convertToCSV: " << e.what() << std::endl;
+#endif
+        return false;
+    }
+
+    std::cout << "[INFO] convertToCSV() finished successfully.\n" << std::endl;
+    return true;
+}
+
+
 
 void recording::requestStop() noexcept
 {

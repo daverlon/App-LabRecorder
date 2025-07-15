@@ -1,0 +1,3 @@
+[submodule "LSL"]
+	path = LSL
+	url = https://github.com/labstreaminglayer/liblsl.git
