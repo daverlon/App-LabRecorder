@@ -46,8 +46,16 @@ find_package(Threads REQUIRED)
 add_subdirectory(xdfwriter)
 
 # ---- Include libxdf ----
-set(XDF_INCLUDE_DIR "C:/Program Files (x86)/libxdf/include")
-set(XDF_LIBRARY "C:/Program Files (x86)/libxdf/lib/xdf.lib")
+if (WIN32)
+    set(XDF_INCLUDE_DIR "C:/Program Files (x86)/libxdf/include")
+    set(XDF_LIBRARY "C:/Program Files (x86)/libxdf/lib/xdf.lib")
+endif()
+
+if(APPLE)
+    set(XDF_INCLUDE_DIR "/opt/homebrew/include")  # or /opt/homebrew/include
+    set(XDF_LIBRARY "/usr/local/lib/libxdf.dylib")  # or .a if statically linked
+endif()
+
 
 add_library(libxdf STATIC IMPORTED)
 set_target_properties(libxdf PROPERTIES
