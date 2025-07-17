@@ -52,9 +52,14 @@ if (WIN32)
 endif()
 
 if(APPLE)
-    set(XDF_INCLUDE_DIR "/opt/homebrew/include")  # or /opt/homebrew/include
-    set(XDF_LIBRARY "/usr/local/lib/libxdf.dylib")  # or .a if statically linked
+    # set(XDF_INCLUDE_DIR "/opt/homebrew/include")  # or /opt/homebrew/include
+    # set(XDF_LIBRARY "/usr/local/lib/libxdf.dylib")  # or .a if statically linked
+    set(XDF_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/external/libxdf/)
+    set(XDF_LIBRARY ${CMAKE_SOURCE_DIR}/external/libxdf/libxdf.a)
+    
 endif()
+
+
 
 
 add_library(libxdf STATIC IMPORTED)
